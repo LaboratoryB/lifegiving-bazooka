@@ -1,0 +1,112 @@
+#define ORIGINATOR_ADDRESS 1000
+#define TOTAL_MEMBERS 1001
+#define MEMBER_DATABASE_START 1100
+#define MEMBER_COLUMNS 3
+#define INDEX_REFERENCE 0
+#define INDEX_PARENTS 1
+#define INDEX_BALANCE 2
+
+arraybase = MEMBER_DATABASE_START
+arraylen = MEMBER_COLUMNS
+
+if tx.datan:
+
+    // Initialize the pyramid with the founder.
+    if tx.data[0] == 0:
+
+        // Only initialize once.
+        if contract.storage[ORIGINATOR_ADDRESS] > 0:
+            stop
+
+        // The sender is now the top of the pyramid
+        contract.storage[ORIGINATOR_ADDRESS] = tx.sender
+        contract.storage[TOTAL_MEMBERS] = 1
+
+        // Set them as the first member number, as their own reference.
+        contract.storage[arraybase+INDEX_REFERENCE] = tx.sender
+        contract.storage[arraybase+INDEX_PARENTS] = 1
+        contract.storage[arraybase+INDEX_BALANCE] = tx.value
+        contract.storage[tx.sender] = 1
+
+    // Join the pyramid 
+    if tx.data[0] == 1:
+
+        // Check if pyramid is initialized
+        if contract.storage[ORIGINATOR_ADDRESS] < 1:
+            stop
+
+        // Check if the reference exists
+        if contract.storage[tx.data[1]] < 1:
+            stop
+        
+        // Make a new member number.
+        membernumber = contract.storage[TOTAL_MEMBERS] + 1
+        contract.storage[TOTAL_MEMBERS] = membernumber
+
+        // Remember me as my new number
+        contract.storage[tx.sender] = membernumber
+        
+        // Get my contracts reference number
+        refnum = contract.storage[tx.data[1]]
+        
+        // Look up references point in the array.
+        refpoint = (refnum - 1) * arraylen + arraybase
+        parents = contract.storage[refpoint+INDEX_PARENTS]
+
+        // Setup my information in the db.
+        mystart = (membernumber - 1) * arraylen + arraybase
+        contract.storage[mystart] = tx.data[1]
+        contract.storage[mystart+INDEX_PARENTS] = parents + 1
+
+        // Figure out the redistribution
+        redist = tx.value / parents
+        numerator = tx.value
+        divisor = parents
+        remainder = numerator % divisor
+        redist = numerator / divisor
+        index = 0
+ 
+        // Loop through parental tree.
+        while index < parents:
+            index = index + 1
+            refbalance = contract.storage[refpoint+INDEX_BALANCE]
+            contract.storage[refpoint+INDEX_BALANCE] = refbalance + redist
+
+        // Then the remainder goes to the head of the pyramid, obviously unfair (as if the rest isn't)
+        masterbalance = contract.storage[arraybase+INDEX_BALANCE]
+        contract.storage[arraybase+INDEX_BALANCE] = masterbalance + remainder
+
+        // Debug values.
+        // contract.storage[2000] = membernumber
+        // contract.storage[2001] = refpoint
+        // contract.storage[2002] = mystart
+        // contract.storage[2003] = redist
+        // contract.storage[2004] = parents
+
+    // Withdraw mode.
+    if tx.data[0] == 2:
+
+        // Setup what we know about this person.
+        // See if this person exists.
+        membernumber = contract.storage[tx.sender]
+        if membernumber < 1:
+            stop
+
+        // Find them in the database.
+        mystart = (membernumber - 1) * arraylen + arraybase
+
+        // See if this person's balance is enough.
+        balance = contract.storage[mystart+INDEX_BALANCE]
+
+        // The originator can always withdraw.
+        if membernumber > 1:
+            // Stop if their balance is too low.
+            if tx.data[1] > balance:
+                stop
+
+        // Calculate their new balance.
+        contract.storage[mystart+INDEX_BALANCE] = balance - tx.data[1]
+
+        // Now we can transact with them.
+        mktx(tx.sender,tx.data[1],0,0)
+
